@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ComfyUI 生成物（体积巨大，绝不能提交）
+input/
+output/
+models/
+temp/
+!ComfyUI_MarkNote/
+
+# 打包产物
+dist/
+build/
+*.zip
+*.tgz
+
+# 测试临时产物
+test-marknote/cdpprofile_*/
+test-marknote/_out.html
+test-marknote/_err.txt
+test-marknote/font-face-data.js
+# 注：test-marknote/ComfyUI_MarkNote/ 是测试必需的 marknote.js 副本（ES module 隔离），
+# 在 dist 作为仓库根时必须保留，不要在 dist 仓库里忽略它。
+test-marknote/fe-src/
+test-marknote/realtime/
+node_modules/
+package-lock.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

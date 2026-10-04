@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>MarkNote 离线字体自检</title>
+<style id="marknote-style"></style>
+</head>
+<body>
+<div id="sandbox" style="position:absolute;left:-99999px;top:0"></div>
+<div id="out"></div>
+<script type="module">
+// font-face-data.js 由 font-offline-run.mjs 从 marknote.js 里抽取生成，
+// 保证测的是源码里的真实声明，而不是手抄一份。
+import { FONT_BASE, FONT_FACE_LOCAL } from "./font-face-data.js";
+
+const resolvedBase = new URL(FONT_BASE, import.meta.url).href;
+document.getElementById("marknote-style").textContent = FONT_FACE_LOCAL;
+
+const declared = Array.from(FONT_FACE_LOCAL.matchAll(/font-family:\s*"([^"]+)"/g)).map(m => m[1]);
+const FAMILY_FILE = {
+  "Liu Jian Mao Cao": "liu-jian-mao-cao.woff2",
+  "Ma Shan Zheng": "ma-shan-zheng.woff2",
+  "ZCOOL KuaiLe": "zcool-kuaile.woff2",
+  "Noto Serif SC": "noto-serif-sc.woff2"
+};
+
+const results = [];
+function report(name, pass, detail) {
+  results.push({ name, pass: !!pass, detail: String(detail) });
+  const div = document.createElement("div");
+  div.textContent = (pass ? "PASS | " : "FAIL | ") + name + " :: " + detail;
+  div.className = pass ? "pass" : "fail";
+  document.getElementById("out").appendChild(div);
+}
+
+/* 把一段文字用指定 font-family 画到 canvas，返回像素数据。
+   CJK 字体每个字都是全角 em，用 measureText 比宽度分辨不出
+   （思源宋体/马善政 与默认 serif 宽度完全一样，都是 8 字 × 64px = 512px），
+   必须比像素。 */
+function renderPixels(fontFamily, text) {
+  const cv = document.createElement("canvas");
+  cv.width = 400; cv.height = 100;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = "#000";
+  ctx.textBaseline = "top";
+  ctx.font = '64px ' + fontFamily;
+  ctx.fillText(text, 4, 4);
+  return ctx.getImageData(0, 0, cv.width, cv.height).data;
+}
+function pixelDiff(a, b) {
+  let n = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    if (Math.abs(a[i] - b[i]) > 24) n++;
+  }
+  return n;
+}
+
+async function run() {
+  report("声明了 4 个 @font-face", declared.length === 4,
+    "count=" + declared.length + " -> " + declared.join(", "));
+
+  // 1) 逐个用 FontFace API 真实加载（走本地 http，不联网）
+  const loaded = [];
+  for (const fam of declared) {
+    const file = FAMILY_FILE[fam];
+    if (!file) { report("离线加载 " + fam, false, "没有对应的 woff2 映射（不该发生）"); continue; }
+    try {
+      const res = await fetch(resolvedBase + file);
+      if (!res.ok) { report("离线加载 " + fam, false, file + " -> HTTP " + res.status); continue; }
+      const buf = await res.arrayBuffer();
+      const ff = new FontFace(fam, buf);
+      await ff.load();
+      document.fonts.add(ff);
+      loaded.push(fam);
+      report("离线加载 " + fam, true, file + " " + (buf.byteLength / 1024).toFixed(0) + " KB");
+    } catch (e) {
+      report("离线加载 " + fam, false, file + " -> " + String(e && e.message || e));
+    }
+  }
+
+  // 2) 确认字体已进入 document.fonts 集合（而不是 check()——后者语义是
+  //    "当前已加载且能渲染该文本"，对刚 add 进去的字体时序上不稳）
+  const inSet = new Set();
+  document.fonts.forEach(f => inSet.add(f.family.replace(/^["']|["']$/g, "")));
+  for (const fam of declared) {
+    report("已注册进 document.fonts " + fam, inSet.has(fam), inSet.has(fam) ? "yes" : "no");
+  }
+
+  // 3) 像素级验证渲染确实用了该字体。
+  //    ⚠️ 关键：不能拿默认 serif 当基准 —— 思源宋体 Noto Serif SC 本身就是
+  //    标准的中文衬线体，headless Chrome 的默认 serif 可能就是它（或与其
+  //    字形几乎一致），diff 会接近 0 而误判为"没生效"。
+  //    正确做法：与另一款**风格明显不同**的 webfont（站酷快乐体是圆体）对比，
+  //    差异显著才说明当前字体真的被用上了。
+  const TEXT = "永和九年岁在癸丑暮春之初";
+  const REF_FAMILY = "ZCOOL KuaiLe";     // 圆体，与任何衬线/手写体都差得开
+  const refPx = renderPixels('"' + REF_FAMILY + '"', TEXT);
+  for (const fam of declared) {
+    if (fam === REF_FAMILY) continue;     // 基准自身无需自证
+    const diff = pixelDiff(renderPixels('"' + fam + '"', TEXT), refPx);
+    report("像素级渲染生效 " + fam, diff > 500,
+      "与 " + REF_FAMILY + " 差异像素 " + diff + " 个 (>500 视为生效)");
+  }
+
+  // 4) 已删字体不得再被声明（下拉里会选出没装到的字体）
+  for (const fam of ["ZCOOL XiaoWei", "ZCOOL QingKe HuangYou", "Long Cang", "Zhi Mang Xing"]) {
+    report("已移除 " + fam, declared.indexOf(fam) < 0,
+      declared.indexOf(fam) >= 0 ? "仍在声明中" : "已移除");
+  }
+
+  const fail = results.filter(r => !r.pass).length;
+  document.getElementById("out").setAttribute("data-fail", String(fail));
+  document.getElementById("out").setAttribute("data-total", String(results.length));
+  document.title = "DONE fail=" + fail;
+}
+
+await run();
+</script>
+</body>
+</html>
