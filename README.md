@@ -1,6 +1,7 @@
 # ComfyUI-MarkNote
 
 > ComfyUI 画布上的富文本标注便签节点（**Mark Note**）。
+> (这版本只能在comfyui node2.0测试版使用，请在菜单选择开启node2.0测试版后使用）
 
 ## 这是什么
 
